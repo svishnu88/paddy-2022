@@ -20,13 +20,20 @@ class Learner():
         self.train_loss = AverageMeter('train_loss')
         self.valid_loss = AverageMeter('valid_loss')
         
+    def freeze(self,last_idx=2):
+        for param in list(self.model.parameters())[:-last_idx]:
+            param.requires_grad = False
 
+    def unfreeze(self):
+        for param in list(self.model.parameters()):
+            param.requires_grad = True
 
     def fit(self,epochs=1):
         self.mb = master_bar(range(epochs))
         for epoch in self.mb:
             self.do_train()
             self.do_validate()
+            print(self.train_loss.avg,self.valid_loss.avg)
 
     def do_train(self):
         self.model.train()
@@ -49,7 +56,9 @@ class Learner():
         loss = self.loss_fn(outputs,targs)
         if train:
             accelerate.backward(loss)
-            self.opt.step()
+            self.opt.step()            
+            for param in self.model.parameters():
+                param.grad = None
         return loss.item()
 
 class AverageMeter(object):

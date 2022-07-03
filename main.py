@@ -7,6 +7,7 @@ from learner import Learner
 from torchvision import models
 import torch.nn as nn
 import torch
+import timm
 
 data_path = Path('../data')
 train_images = data_path/'train_images'
@@ -21,8 +22,15 @@ train_images, valid_images = get_split(items=img_files,split=0.2,seed=42)
 
 train_ds = PaddyDataset(files=train_images, label_idx=label_idx, transform=train_transforms)
 valid_ds = PaddyDataset(files=valid_images, label_idx=label_idx, transform=valid_transforms)
-model = models.resnet34(pretrained=True)
+
+model = timm.create_model(model_name='resnet26d',pretrained=True,num_classes=10)
 loss_fn = nn.CrossEntropyLoss()
-optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 learn = Learner(train_ds, valid_ds, model, loss_fn, optimizer)
+learn.freeze()
 learn.fit(1)
+learn.unfreeze()
+learn.fit(3)
+
+
+# https://twitter.com/karpathy/status/1528808361558306817
