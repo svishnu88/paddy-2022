@@ -25,7 +25,7 @@ valid_ds = PaddyDataset(files=valid_images, label_idx=label_idx, transform=valid
 
 model = timm.create_model(model_name='resnet26d',pretrained=True,num_classes=10)
 loss_fn = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 learn = Learner(train_ds, valid_ds, model, loss_fn, optimizer)
 learn.freeze()
 learn.fit(1)

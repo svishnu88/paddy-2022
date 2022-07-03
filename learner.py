@@ -19,6 +19,7 @@ class Learner():
                                                                         optimizer)
         self.train_loss = AverageMeter('train_loss')
         self.valid_loss = AverageMeter('valid_loss')
+        self.valid_acc = AverageMeter('valid_loss')
         
     def freeze(self,last_idx=2):
         for param in list(self.model.parameters())[:-last_idx]:
@@ -30,15 +31,17 @@ class Learner():
 
     def fit(self,epochs=1):
         self.mb = master_bar(range(epochs))
+        print(['train_loss', 'valid_loss', 'err_rate'])
         for epoch in self.mb:
             self.do_train()
             self.do_validate()
-            print(self.train_loss.avg,self.valid_loss.avg)
+            print([f"{self.train_loss.avg:.3f}",f"{self.valid_loss.avg:.3f}",f"{1-self.valid_acc.avg:.3f}"])
+            
 
     def do_train(self):
         self.model.train()
         for i,batch in enumerate(progress_bar(self.train_dl, parent=self.mb)):
-            loss = self.one_batch(i,batch,train=True)
+            loss,_ = self.one_batch(i,batch,train=True)
             self.train_loss.update(loss,batch[0].shape[0])
             self.mb.child.comment = f"{self.train_loss}"
     
@@ -46,8 +49,9 @@ class Learner():
         self.model.eval()
         for i,batch in enumerate(progress_bar(self.valid_dl, parent=self.mb)):
             with torch.no_grad():
-                loss = self.one_batch(i,batch,train=False)
+                loss,acc = self.one_batch(i,batch,train=False)
                 self.valid_loss.update(loss,batch[0].shape[0])
+                self.valid_acc.update(acc,batch[0].shape[0])
                 self.mb.child.comment = f"{self.valid_loss}"
 
     def one_batch(self,i,batch,train=True):
@@ -59,7 +63,12 @@ class Learner():
             self.opt.step()            
             for param in self.model.parameters():
                 param.grad = None
-        return loss.item()
+        acc = accuracy(outputs, targs)
+        return loss.item(),acc
+
+def accuracy(out,targ):
+    acc = targ.eq(out.max(dim=1)[1]).float().sum()/len(targ)
+    return acc.item()
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
