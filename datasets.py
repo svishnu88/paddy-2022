@@ -19,7 +19,7 @@ class PaddyDataset(Dataset):
         img = Image.open(img_path).convert('RGB')
         label = self.labels[index]
         if self.transform is not None:
-            img = self.transform(img)
+            img = self.transform(image=np.array(img))['image']
 
         return img, label
 

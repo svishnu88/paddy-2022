@@ -1,41 +1,55 @@
-from torch.utils.data import DataLoader
 from accelerate import Accelerator
 import torch
 from fastprogress.fastprogress import master_bar, progress_bar
+import wandb
+from utils import Config
 
 accelerate = Accelerator()
 
 class Learner():
-    def __init__(self,train_ds,valid_ds,model, loss_fn, optimizer,batch_size=32):
-        self.train_ds = train_ds
-        self.valid_ds = valid_ds
+    def __init__(self, train_dl, valid_dl, model, loss_fn, optimizer, lr_scheduler, config:Config=None):
+        self.train_dl = train_dl
+        self.valid_dl = valid_dl
         self.device = accelerate.device
         self.loss_fn = loss_fn
-        train_dl = DataLoader(dataset=train_ds,batch_size=batch_size,shuffle=True,num_workers=6)
-        valid_dl = DataLoader(dataset=valid_ds,batch_size=batch_size,shuffle=False,num_workers=6)
-        self.model, self.train_dl, self.valid_dl, self.opt = accelerate.prepare(model,
+        self.config = config
+        self.opt = optimizer
+        self.lr_scheduler = lr_scheduler
+        self.model, self.train_dl, self.valid_dl, self.opt= accelerate.prepare(model,
                                                                         train_dl,
                                                                         valid_dl,
-                                                                        optimizer)
+                                                                        self.opt)
+        
         self.train_loss = AverageMeter('train_loss')
         self.valid_loss = AverageMeter('valid_loss')
         self.valid_acc = AverageMeter('valid_loss')
         
     def freeze(self,last_idx=2):
+        print(f"Froze model {self.epoch}")
         for param in list(self.model.parameters())[:-last_idx]:
             param.requires_grad = False
+        # for name, param in self.model.named_parameters():
+        #     if name.find('bn') != -1:
+        #         param.requires_grad = True
 
     def unfreeze(self):
+        print(f"UnFreeze model {self.epoch}")
         for param in list(self.model.parameters()):
             param.requires_grad = True
 
-    def fit(self,epochs=1):
-        self.mb = master_bar(range(epochs))
-        print(['train_loss', 'valid_loss', 'err_rate'])
-        for epoch in self.mb:
-            self.do_train()
-            self.do_validate()
-            print([f"{self.train_loss.avg:.3f}",f"{self.valid_loss.avg:.3f}",f"{1-self.valid_acc.avg:.3f}"])
+    def fit(self,epochs=1, freeze_until=1):
+        with wandb.init(project="paddy-temp",config=self.config):
+            # wandb.watch(self.model,self.loss_fn,log='all',log_freq=100)
+            self.mb = master_bar(range(epochs))
+            print(['train_loss', 'valid_loss', 'err_rate'])
+            for self.epoch in self.mb:
+                if self.epoch < freeze_until:
+                    self.freeze()
+                elif self.epoch == freeze_until:
+                    self.unfreeze()
+                self.do_train()
+                self.do_validate()
+                print([f"{self.train_loss.avg:.3f}",f"{self.valid_loss.avg:.3f}",f"{1-self.valid_acc.avg:.3f}"])
             
 
     def do_train(self):
@@ -44,6 +58,10 @@ class Learner():
             loss,_ = self.one_batch(i,batch,train=True)
             self.train_loss.update(loss,batch[0].shape[0])
             self.mb.child.comment = f"{self.train_loss}"
+            if i % 25 == 0:
+                # print(self.lr_scheduler.get_last_lr())
+                wandb.log({"epoch":self.epoch, "train_loss":self.train_loss.avg,"lr":self.opt.optimizer.param_groups[0]['lr']})
+                # self.opt.param_groups[0]['lr']
     
     def do_validate(self):
         self.model.eval()
@@ -53,6 +71,9 @@ class Learner():
                 self.valid_loss.update(loss,batch[0].shape[0])
                 self.valid_acc.update(acc,batch[0].shape[0])
                 self.mb.child.comment = f"{self.valid_loss}"
+                if i % 25 == 0:
+                    wandb.log({"epoch":self.epoch, "valid_loss":self.valid_loss.avg})
+                    wandb.log({"epoch":self.epoch, "valid_acc":self.valid_acc.avg})
 
     def one_batch(self,i,batch,train=True):
         inp, targs = batch
@@ -60,7 +81,8 @@ class Learner():
         loss = self.loss_fn(outputs,targs)
         if train:
             accelerate.backward(loss)
-            self.opt.step()            
+            self.opt.step()
+            self.lr_scheduler.step()
             for param in self.model.parameters():
                 param.grad = None
         acc = accuracy(outputs, targs)
